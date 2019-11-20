@@ -30,6 +30,8 @@ from torch.utils.data import DataLoader
 import utils
 from collections import OrderedDict
 
+import time
+
 cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(description='Wide Residual Networks')
@@ -44,26 +46,20 @@ parser.add_argument('--teacher_params', default='', type=str)
 # Training options
 parser.add_argument('--batch_size', default=256, type=int)
 parser.add_argument('--lr', default=0.1, type=float)
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
-                    help='number of total epochs to run')
+parser.add_argument('--epochs', default=100, type=int, metavar='N',help='number of total epochs to run')
 parser.add_argument('--weight_decay', default=1e-4, type=float)
-parser.add_argument('--epoch_step', default='[30,60,90]', type=str,
-                    help='json list with epochs to drop lr on')
+parser.add_argument('--epoch_step', default='[30,60,90]', type=str,help='json list with epochs to drop lr on')
 parser.add_argument('--lr_decay_ratio', default=0.1, type=float)
 parser.add_argument('--resume', default='', type=str)
 parser.add_argument('--temperature', default=4, type=float)
 parser.add_argument('--alpha', default=0, type=float)
 parser.add_argument('--beta', default=0, type=float)
 
-
 # Device options
 parser.add_argument('--cuda', action='store_true')
-parser.add_argument('--save', default='', type=str,
-                    help='save parameters and logs in this folder')
-parser.add_argument('--ngpu', default=1, type=int,
-                    help='number of GPUs to use for training')
-parser.add_argument('--gpu_id', default='0', type=str,
-                    help='id(s) for CUDA_VISIBLE_DEVICES')
+parser.add_argument('--save', default='', type=str,help='save parameters and logs in this folder')
+parser.add_argument('--ngpu', default=1, type=int,help='number of GPUs to use for training')
+parser.add_argument('--gpu_id', default='0', type=str,help='id(s) for CUDA_VISIBLE_DEVICES')
 
 
 def get_iterator(imagenetpath, batch_size, nthread, mode):
@@ -89,8 +85,7 @@ def get_iterator(imagenetpath, batch_size, nthread, mode):
             normalize,
         ]))
 
-    return DataLoader(ds, batch_size=batch_size, shuffle=mode,
-                      num_workers=nthread, pin_memory=True)
+    return DataLoader(ds, batch_size=batch_size, shuffle=mode,num_workers=nthread, pin_memory=True)
 
 
 def define_teacher(params_file):
@@ -203,6 +198,7 @@ def define_student(depth, width):
 
 
 def main():
+    st = time.time()
     opt = parser.parse_args()
     epoch_step = json.loads(opt.epoch_step)
     print('parsed options:', vars(opt))
@@ -334,6 +330,8 @@ def main():
     engine.hooks['on_end_epoch'] = on_end_epoch
     engine.hooks['on_start'] = on_start
     engine.train(h, iter_train, opt.epochs, optimizer)
+
+    print("total time: {}".format(time.time()-st))
 
 
 if __name__ == '__main__':
