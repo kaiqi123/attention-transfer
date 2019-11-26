@@ -12,6 +12,7 @@
     2017 Sergey Zagoruyko
 """
 
+
 import argparse
 import os
 import re
