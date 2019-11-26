@@ -41,6 +41,7 @@ parser.add_argument('--width', default=1, type=float)
 parser.add_argument('--imagenetpath', default='/home/zagoruys/ILSVRC2012', type=str)
 parser.add_argument('--nthread', default=4, type=int)
 parser.add_argument('--teacher_params', default='', type=str)
+parser.add_argument('--teacher_id', default='', type=str)
 
 # Training options
 parser.add_argument('--batch_size', default=256, type=int)
@@ -210,9 +211,19 @@ def main():
         os.mkdir(opt.save)
 
     f_s, params_s = define_student(opt.depth, opt.width)
-    f_t, params_t = define_teacher(opt.teacher_params)
-    params = {'student.'+k: v for k, v in params_s.items()}
-    params.update({'teacher.'+k: v for k, v in params_t.items()})
+
+    if opt.teacher_id:
+        assert opt.teacher_id == "resnet34"
+        f_t, params_t = define_teacher(opt.teacher_params)
+        params = {'student.'+k: v for k, v in params_s.items()}
+        params.update({'teacher.'+k: v for k, v in params_t.items()})
+        def f(inputs, params, mode):
+            y_s, g_s = f_s(inputs, params, mode, 'student.')
+            with torch.no_grad():
+                y_t, g_t = f_t(inputs, params, 'teacher.')
+            return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
+    else:
+        f, params = f_s, params_s
 
     params = OrderedDict((k, p.cuda().detach().requires_grad_(p.requires_grad)) for k, p in params.items())
 
@@ -248,21 +259,19 @@ def main():
     timer_test = tnt.meter.TimeMeter('s')
     meters_at = [tnt.meter.AverageValueMeter() for i in range(4)]
 
-    def f(inputs, params, mode):
-        y_s, g_s = f_s(inputs, params, mode, 'student.')
-        with torch.no_grad():
-            y_t, g_t = f_t(inputs, params, 'teacher.')
-        return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
-
     def h(sample):
         inputs, targets, mode = sample
         inputs = inputs.cuda().detach()
         targets = targets.cuda().long().detach()
-        y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, mode, range(opt.ngpu))
-        loss_groups = [v.sum() for v in loss_groups]
-        [m.add(v.item()) for m,v in zip(meters_at, loss_groups)]
-        return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) \
-                + opt.beta * sum(loss_groups), y_s
+        if opt.teacher_id != '':
+            y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, mode, range(opt.ngpu))
+            loss_groups = [v.sum() for v in loss_groups]
+            [m.add(v.item()) for m,v in zip(meters_at, loss_groups)]
+            return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) \
+                    + opt.beta * sum(loss_groups), y_s
+        else:
+            y = utils.data_parallel(f, inputs, params, mode, range(opt.ngpu))[0]
+            return F.cross_entropy(y, targets), y
 
     def log(t, state):
         torch.save(dict(params={k: v.data for k, v in params.items()},
