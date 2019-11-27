@@ -15,7 +15,6 @@ def plot_acc(log_name, frame, numParame, acc_type='test_acc', top_n='top_1'):
 def plotLogs(log_names):
 
     os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/')
-
     frames = [pd.DataFrame(sweeper.loadLog('./logs/' + log + '/log.txt')) for log in log_names]
 
     for i, frame in enumerate(frames):
