@@ -14,15 +14,14 @@ def plot_acc(log_name, frame, numParame, acc_type='test_acc', top_n='top_1'):
 
 
 def plotLogs(log_names):
-    os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/')
     frames = [pd.DataFrame(sweeper.loadLog('./logs/' + log + '/log.txt')) for log in log_names]
 
     for i, frame in enumerate(frames):
         log_name = log_names[i]
         numParame = round(float(frame["n_parameters"][0] / 1000000.), 2)
         plot_acc(log_name, frame, numParame, 'test_acc', 'top_1')
+        # plot_acc(log_name, frame, numParame, 'test_acc', 'top_5')
         # plot_acc(log_name, frame, numParame, 'train_acc', 'top_1')
-        plot_acc(log_name, frame, numParame, 'test_acc', 'top_5')
         # plot_acc(log_name, frame, numParame, 'train_acc', 'top_5')
 
     plt.xlabel("epoch")
@@ -32,4 +31,11 @@ def plotLogs(log_names):
 
 
 # plotLogs(['WRN-d28-w10'])
+os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/')
 plotLogs(['imagenet_independent_resnet18'])
+plotLogs(['cifar10_teacher_d28w10_bs128', 'cifar10_teacher_d28w10_bs512',
+          'cifar10_independent_d10w10_bs512',
+          "cifar10_dependent_d10w10_bs512_onlyFc"])
+plotLogs(['cifar10_teacher_d28w10_bs512', 'cifar10_teacher_d28w10_bs512_lrCosine',
+          'cifar10_independent_d10w10_bs512_lrCosine',
+          "cifar10_dependent_d10w10_bs512_onlyFc_lrCosine"])

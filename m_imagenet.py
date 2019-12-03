@@ -1,16 +1,3 @@
-"""
-    PyTorch training code for
-    "Paying More Attention to Attention: Improving the Performance of
-                Convolutional Neural Networks via Attention Transfer"
-    https://arxiv.org/abs/1612.03928
-    
-    This file includes:
-     * ImageNet ResNet training code that follows
-       https://github.com/facebook/fb.resnet.torch
-     * Activation-based attention transfer on ImageNet
-
-    2017 Sergey Zagoruyko
-"""
 import argparse
 import os
 import re
@@ -60,6 +47,9 @@ parser.add_argument('--cuda', action='store_true')
 parser.add_argument('--save', default='', type=str,help='save parameters and logs in this folder')
 parser.add_argument('--ngpu', default=1, type=int,help='number of GPUs to use for training')
 parser.add_argument('--gpu_id', default='0', type=str,help='id(s) for CUDA_VISIBLE_DEVICES')
+
+# KT methods options
+parser.add_argument('--kt_method', default='#', type=str, help="at,st,kd")
 
 
 def get_iterator(imagenetpath, batch_size, nthread, mode):
@@ -229,13 +219,18 @@ def main():
 
     optimizable = [v for v in params.values() if v.requires_grad]
     def create_optimizer(opt, lr):
-        print('creating optimizer with lr = ', lr)
+        # print('creating optimizer with lr = ', lr)
         return SGD(optimizable, lr, momentum=0.9, weight_decay=opt.weight_decay)
 
     optimizer = create_optimizer(opt, opt.lr)
 
     iter_train = get_iterator(opt.imagenetpath, opt.batch_size, opt.nthread, True)
     iter_test = get_iterator(opt.imagenetpath, opt.batch_size, opt.nthread, False)
+    train_size = len(iter_train.dataset)
+    test_size = len(iter_test.dataset)
+    steps_per_epoch = round(train_size / opt.batch_size)
+    total_steps = opt.epochs * steps_per_epoch
+    print("train size: {}, test size: {}, steps per epoch: {}, total steps: {}".format(train_size, test_size, steps_per_epoch, total_steps))
 
     epoch = 0
     if opt.resume != '':
@@ -248,7 +243,6 @@ def main():
 
     print('\nParameters:')
     utils.print_tensor_dict(params)
-
 
     n_parameters = sum(p.numel() for p in optimizable)
     print('\nTotal number of parameters:', n_parameters)
@@ -264,11 +258,14 @@ def main():
         inputs = inputs.cuda().detach()
         targets = targets.cuda().long().detach()
         if opt.teacher_id != '':
-            y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, mode, range(opt.ngpu))
-            loss_groups = [v.sum() for v in loss_groups]
-            [m.add(v.item()) for m,v in zip(meters_at, loss_groups)]
-            return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) \
-                    + opt.beta * sum(loss_groups), y_s
+            if opt.kt_method == "at":
+                y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, mode, range(opt.ngpu))
+                loss_groups = [v.sum() for v in loss_groups]
+                [m.add(v.item()) for m,v in zip(meters_at, loss_groups)]
+                return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) + opt.beta * sum(loss_groups), y_s
+            elif opt.kt_method == "st":
+                y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
+                return torch.sqrt(torch.mean((y_s - y_t) ** 2)), y_s
         else:
             y = utils.data_parallel(f, inputs, params, mode, range(opt.ngpu))[0]
             return F.cross_entropy(y, targets), y
@@ -286,6 +283,10 @@ def main():
 
     def on_sample(state):
         state['sample'].append(state['train'])
+
+        # if state['sample'][2]:
+        #     curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
+        #     state['optimizer'] = create_optimizer(opt, curr_lr)
 
     def on_forward(state):
         classacc.add(state['output'].data, state['sample'][1])
@@ -329,6 +330,8 @@ def main():
             "train_time": train_time,
             "test_time": timer_test.value(),
             "at_losses": [m.value() for m in meters_at],
+            "kt_method": opt.kt_method,
+            "curr_lr": state['optimizer'].param_groups[0]['lr'],
            }, state))
 
     engine = Engine()

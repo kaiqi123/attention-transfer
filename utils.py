@@ -57,8 +57,7 @@ def data_parallel(f, input, params, mode, device_ids, output_device=None):
     params_replicas = [{k: params_all[i + j*len(params)] for i, k in enumerate(params.keys())}
                        for j in range(len(device_ids))]
 
-    replicas = [partial(f, params=p, mode=mode)
-                for p in params_replicas]
+    replicas = [partial(f, params=p, mode=mode) for p in params_replicas]
     inputs = scatter([input], device_ids)
     outputs = parallel_apply(replicas, inputs)
     return gather(outputs, output_device)
