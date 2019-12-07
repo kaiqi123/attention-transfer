@@ -20,8 +20,8 @@ def plotLogs(dir, log_names):
         log_name = log_names[i]
         numParame = round(float(frame["n_parameters"][0] / 1000000.), 2)
         plot_acc(log_name, frame, numParame, 'test_acc', 'top_1')
-        # plot_acc(log_name, frame, numParame, 'test_acc', 'top_5')
         # plot_acc(log_name, frame, numParame, 'train_acc', 'top_1')
+        plot_acc(log_name, frame, numParame, 'test_acc', 'top_5')
         # plot_acc(log_name, frame, numParame, 'train_acc', 'top_5')
 
     plt.xlabel("epoch")
