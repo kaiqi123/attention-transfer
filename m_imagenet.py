@@ -79,15 +79,8 @@ def get_iterator(imagenetpath, batch_size, nthread, mode):
 
 
 def define_teacher(params_file):
-    """ Defines student resnet
-        
-        Network size is determined from parameters, assuming
-        pre-activation basic-block resnet (ResNet-18 or ResNet-34)
-    """
     params = torch.load(params_file)
-
     params = {k: p.cuda() for k, p in params.items()}
-
     blocks = [sum([re.match('group%d.block\d+.conv0.weight'%j, k) is not None
                    for k in list(params.keys())]) for j in range(4)]
 
@@ -226,11 +219,11 @@ def main():
 
     iter_train = get_iterator(opt.imagenetpath, opt.batch_size, opt.nthread, True)
     iter_test = get_iterator(opt.imagenetpath, opt.batch_size, opt.nthread, False)
-    train_size = len(iter_train.dataset)
-    test_size = len(iter_test.dataset)
-    steps_per_epoch = round(train_size / opt.batch_size)
-    total_steps = opt.epochs * steps_per_epoch
-    print("train size: {}, test size: {}, steps per epoch: {}, total steps: {}".format(train_size, test_size, steps_per_epoch, total_steps))
+    # train_size = len(iter_train.dataset)
+    # test_size = len(iter_test.dataset)
+    # steps_per_epoch = round(train_size / opt.batch_size)
+    # total_steps = opt.epochs * steps_per_epoch
+    # print("train size: {}, test size: {}, steps per epoch: {}, total steps: {}".format(train_size, test_size, steps_per_epoch, total_steps))
 
     epoch = 0
     if opt.resume != '':
@@ -252,6 +245,19 @@ def main():
     timer_train = tnt.meter.TimeMeter('s')
     timer_test = tnt.meter.TimeMeter('s')
     meters_at = [tnt.meter.AverageValueMeter() for i in range(4)]
+
+    if opt.teacher_id != '':
+        classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
+        t_test_acc_top1 = []; t_test_acc_top5 = []
+        with torch.no_grad():
+            for i, (inputs, targets) in enumerate(iter_test):
+                inputs = inputs.cuda().detach()
+                targets = targets.cuda().long().detach()
+                y_t, _ = f_t(inputs, params, 'teacher.')
+                classacc_t.add(y_t, targets)
+                t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
+                classacc_t.reset()
+        print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
 
     def h(sample):
         inputs, targets, mode = sample
@@ -283,7 +289,6 @@ def main():
 
     def on_sample(state):
         state['sample'].append(state['train'])
-
         # if state['sample'][2]:
         #     curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
         #     state['optimizer'] = create_optimizer(opt, curr_lr)
@@ -319,12 +324,12 @@ def main():
         timer_test.reset()
 
         engine.test(h, iter_test)
-
+        test_acc = classacc.value()
         print(log({
             "train_loss": train_loss[0],
             "train_acc": train_acc,
             "test_loss": meter_loss.value()[0],
-            "test_acc": classacc.value(),
+            "test_acc": test_acc,
             "epoch": state['epoch'],
             "n_parameters": n_parameters,
             "train_time": train_time,
@@ -332,7 +337,9 @@ def main():
             "at_losses": [m.value() for m in meters_at],
             "kt_method": opt.kt_method,
             "curr_lr": state['optimizer'].param_groups[0]['lr'],
-           }, state))
+        }, state))
+        print('==> id: %s (%d/%d), test_top1_acc: \33[91m%.2f\033[0m, test_top5_acc: \33[91m%.2f\033[0m' %
+              (opt.save, state['epoch'], opt.epochs, test_acc[0], test_acc[1]))
 
     engine = Engine()
     engine.hooks['on_sample'] = on_sample
@@ -341,7 +348,6 @@ def main():
     engine.hooks['on_end_epoch'] = on_end_epoch
     engine.hooks['on_start'] = on_start
     engine.train(h, iter_train, opt.epochs, optimizer)
-
     print("total time: {}".format(time.time()-st))
 
 

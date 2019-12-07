@@ -93,15 +93,18 @@ def resnet(depth, width, num_classes):
 
     utils.set_requires_grad_except_bn_(flat_params)
 
+    out_dict = {}
     def block(x, params, base, mode, stride):
         o1 = F.relu(utils.batch_norm(x, params, base + '.bn0', mode), inplace=True)
         y = F.conv2d(o1, params[base + '.conv0'], stride=stride, padding=1)
         o2 = F.relu(utils.batch_norm(y, params, base + '.bn1', mode), inplace=True)
         z = F.conv2d(o2, params[base + '.conv1'], stride=1, padding=1)
         if base + '.convdim' in params:
-            return z + F.conv2d(o1, params[base + '.convdim'], stride=stride)
+            o = z + F.conv2d(o1, params[base + '.convdim'], stride=stride)
         else:
-            return z + x
+            o = z + x
+        # out_dict[base+'.relu1'] = o1; out_dict[base+'.relu2'] = o2
+        return o
 
     def group(o, params, base, mode, stride):
         for i in range(n):
@@ -120,6 +123,7 @@ def resnet(depth, width, num_classes):
         return o, (g0, g1, g2)
 
     return f, flat_params
+    # return f, flat_params, out_dict
 
 def main():
     st_total = time.time()
@@ -143,6 +147,7 @@ def main():
 
     # deal with student first
     f_s, params_s = resnet(opt.depth, opt.width, num_classes)
+    # f_s, params_s, relu_out_s = resnet(opt.depth, opt.width, num_classes)
     print(type(f_s), type(params_s))
 
     # deal with teacher
@@ -151,7 +156,8 @@ def main():
             line = ff.readline()
             r = line.find('json_stats')
             info = json.loads(line[r + 12:])
-        f_t = resnet(info['depth'], info['width'], num_classes)[0]
+        f_t, _ = resnet(info['depth'], info['width'], num_classes)
+        # f_t, _, relu_out_t = resnet(info['depth'], info['width'], num_classes)
         model_data = torch.load(os.path.join('logs', opt.teacher_id, 'model.pt7'))
         params_t = model_data['params']
 
@@ -160,11 +166,25 @@ def main():
         for k, v in params_t.items():
             params['teacher.' + k] = v.detach().requires_grad_(False)
 
-        def f(inputs, params, mode):
-            y_s, g_s = f_s(inputs, params, mode, 'student.')
-            with torch.no_grad():
-                y_t, g_t = f_t(inputs, params, False, 'teacher.')
-            return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
+        if opt.kt_method == "at":
+            def f(inputs, params, mode):
+                y_s, g_s = f_s(inputs, params, mode, 'student.')
+                with torch.no_grad():
+                    y_t, g_t = f_t(inputs, params, False, 'teacher.')
+                return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
+        elif opt.kt_method == "st":
+            relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
+            relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
+            for key, value in relu_out_s.items(): print(key, value)
+            for key, value in relu_out_t.items(): print(key, value)
+            def f(inputs, params, mode):
+                y_s, g_s = f_s(inputs, params, mode, 'student.')
+                with torch.no_grad():
+                    y_t, g_t = f_t(inputs, params, False, 'teacher.')
+                return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
+        else:
+            raise EOFError("Not found kt method.")
+
     else:
         f, params = f_s, params_s
 
@@ -230,9 +250,9 @@ def main():
     def on_sample(state):
         state['sample'].append(state['train'])
 
-        if state['sample'][2]:
-            curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
-            state['optimizer'] = create_optimizer(opt, curr_lr)
+        # if state['sample'][2]:
+        #     curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
+        #     state['optimizer'] = create_optimizer(opt, curr_lr)
         # print(len(state['sample']), state['sample'][0].size(), state['sample'][1].size(), state['sample'][2])
 
     def on_forward(state):
@@ -249,10 +269,10 @@ def main():
         [meter.reset() for meter in meters_at]
         state['iterator'] = tqdm(train_loader)
 
-        # epoch = state['epoch'] + 1
-        # if epoch in epoch_step:
-        #     lr = state['optimizer'].param_groups[0]['lr']
-        #     state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
+        epoch = state['epoch'] + 1
+        if epoch in epoch_step:
+            lr = state['optimizer'].param_groups[0]['lr']
+            state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
 
     def on_end_epoch(state):
         train_loss = meter_loss.mean

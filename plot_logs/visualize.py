@@ -13,8 +13,8 @@ def plot_acc(log_name, frame, numParame, acc_type='test_acc', top_n='top_1'):
     print("{}, max_{}: {}".format(log_name, label_type, round(max(acc), 2)))
 
 
-def plotLogs(log_names):
-    frames = [pd.DataFrame(sweeper.loadLog('./logs/' + log + '/log.txt')) for log in log_names]
+def plotLogs(dir, log_names):
+    frames = [pd.DataFrame(sweeper.loadLog(dir+log + '/log.txt')) for log in log_names]
 
     for i, frame in enumerate(frames):
         log_name = log_names[i]
@@ -32,10 +32,18 @@ def plotLogs(log_names):
 
 # plotLogs(['WRN-d28-w10'])
 os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/')
-plotLogs(['imagenet_independent_resnet18'])
-plotLogs(['cifar10_teacher_d28w10_bs128', 'cifar10_teacher_d28w10_bs512',
-          'cifar10_independent_d10w10_bs512',
-          "cifar10_dependent_d10w10_bs512_onlyFc"])
-plotLogs(['cifar10_teacher_d28w10_bs512', 'cifar10_teacher_d28w10_bs512_lrCosine',
-          'cifar10_independent_d10w10_bs512_lrCosine',
-          "cifar10_dependent_d10w10_bs512_onlyFc_lrCosine"])
+
+dir = "./logs/cifar10/lr_decay/"
+type = "bs128"
+filenames = [f for f in os.listdir(dir) if type in f]
+plotLogs(dir, filenames)
+
+dir = "./logs/cifar10/lr_cosine/"
+type = "dependent"
+filenames = [f for f in os.listdir(dir) if type in f]
+plotLogs(dir, filenames)
+
+# dir = "./logs/imagenet/"
+# type = ""
+# filenames = [f for f in os.listdir(dir) if type in f]
+# plotLogs(dir, filenames)
