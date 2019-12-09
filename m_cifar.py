@@ -103,8 +103,8 @@ def resnet(depth, width, num_classes):
             o = z + F.conv2d(o1, params[base + '.convdim'], stride=stride)
         else:
             o = z + x
-        out_dict[base+'.relu1'] = o1
-        out_dict[base+'.relu2'] = o2
+        out_dict[base+'.relu1'] = "23"
+        out_dict[base+'.relu2'] = "we"
         return o
 
     def group(o, params, base, mode, stride):
