@@ -109,18 +109,18 @@ def resnet(depth, width, num_classes):
     def group(o, params, base, mode, stride):
         for i in range(n):
             # o = block(o, params, f'{base}.block{i}', mode, stride if i == 0 else 1)
-            o = block(o, params, f"{base}.block{i}", mode, stride if i == 0 else 1)
+            o = block(o, params, "{}.block{}".format(base,i), mode, stride if i == 0 else 1)
         return o
 
     def f(input, params, mode, base=''):
-        x = F.conv2d(input, params[f'{base}conv0'], padding=1)
-        g0 = group(x, params, f'{base}group0', mode, 1)
-        g1 = group(g0, params, f'{base}group1', mode, 2)
-        g2 = group(g1, params, f'{base}group2', mode, 2)
-        o = F.relu(utils.batch_norm(g2, params, f'{base}bn', mode))
+        x = F.conv2d(input, params['{}conv0'.format(base)], padding=1)
+        g0 = group(x, params, '{}group0'.foramt(base), mode, 1)
+        g1 = group(g0, params, '{}group1'.format(base), mode, 2)
+        g2 = group(g1, params, '{}group2'.format(base), mode, 2)
+        o = F.relu(utils.batch_norm(g2, params, '{}bn'.format(base), mode))
         o = F.avg_pool2d(o, 8, 1, 0)
         o = o.view(o.size(0), -1)
-        o = F.linear(o, params[f'{base}fc.weight'], params[f'{base}fc.bias'])
+        o = F.linear(o, params['{}fc.weight'.format(base)], params['{}fc.bias'.format(base)])
         return o, (g0, g1, g2)
 
     return f, flat_params
