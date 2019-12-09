@@ -108,7 +108,8 @@ def resnet(depth, width, num_classes):
 
     def group(o, params, base, mode, stride):
         for i in range(n):
-            o = block(o, params, f'{base}.block{i}', mode, stride if i == 0 else 1)
+            # o = block(o, params, f'{base}.block{i}', mode, stride if i == 0 else 1)
+            o = block(o, params, f"{base}.block{i}", mode, stride if i == 0 else 1)
         return o
 
     def f(input, params, mode, base=''):
