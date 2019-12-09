@@ -103,12 +103,11 @@ def resnet(depth, width, num_classes):
             o = z + F.conv2d(o1, params[base + '.convdim'], stride=stride)
         else:
             o = z + x
-        # out_dict[base+'.relu1'] = o1; out_dict[base+'.relu2'] = o2
+        out_dict[base+'.relu1'] = o1; out_dict[base+'.relu2'] = o2
         return o
 
     def group(o, params, base, mode, stride):
         for i in range(n):
-            # o = block(o, params, f'{base}.block{i}', mode, stride if i == 0 else 1)
             o = block(o, params, '{}.block{}'.format(base, i), mode, stride if i == 0 else 1)
         return o
 
@@ -123,8 +122,8 @@ def resnet(depth, width, num_classes):
         o = F.linear(o, params['{}fc.weight'.format(base)], params['{}fc.bias'.format(base)])
         return o, (g0, g1, g2)
 
-    return f, flat_params
-    # return f, flat_params, out_dict
+    # return f, flat_params
+    return f, flat_params, out_dict
 
 def main():
     st_total = time.time()
@@ -147,8 +146,8 @@ def main():
     print("train size: {}, test size: {}, steps per epoch: {}, total steps: {}".format(train_size, test_size, steps_per_epoch, total_steps))
 
     # deal with student first
-    f_s, params_s = resnet(opt.depth, opt.width, num_classes)
-    # f_s, params_s, relu_out_s = resnet(opt.depth, opt.width, num_classes)
+    # f_s, params_s = resnet(opt.depth, opt.width, num_classes)
+    f_s, params_s, relu_out_s = resnet(opt.depth, opt.width, num_classes)
     print(type(f_s), type(params_s))
 
     # deal with teacher
@@ -157,8 +156,8 @@ def main():
             line = ff.readline()
             r = line.find('json_stats')
             info = json.loads(line[r + 12:])
-        f_t, _ = resnet(info['depth'], info['width'], num_classes)
-        # f_t, _, relu_out_t = resnet(info['depth'], info['width'], num_classes)
+        # f_t, _ = resnet(info['depth'], info['width'], num_classes)
+        f_t, _, relu_out_t = resnet(info['depth'], info['width'], num_classes)
         model_data = torch.load(os.path.join('logs', opt.teacher_id, 'model.pt7'))
         params_t = model_data['params']
 
@@ -174,10 +173,10 @@ def main():
                     y_t, g_t = f_t(inputs, params, False, 'teacher.')
                 return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
         elif opt.kt_method == "st":
-            # relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
-            # relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
-            # for key, value in relu_out_s.items(): print(key, value)
-            # for key, value in relu_out_t.items(): print(key, value)
+            relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
+            relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
+            for key, value in relu_out_s.items(): print(key, value)
+            for key, value in relu_out_t.items(): print(key, value)
             def f(inputs, params, mode):
                 y_s, g_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
