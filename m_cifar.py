@@ -174,10 +174,10 @@ def main():
                     y_t, g_t = f_t(inputs, params, False, 'teacher.')
                 return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
         elif opt.kt_method == "st":
-            relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
-            relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
-            for key, value in relu_out_s.items(): print(key, value)
-            for key, value in relu_out_t.items(): print(key, value)
+            # relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
+            # relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
+            # for key, value in relu_out_s.items(): print(key, value)
+            # for key, value in relu_out_t.items(): print(key, value)
             def f(inputs, params, mode):
                 y_s, g_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
