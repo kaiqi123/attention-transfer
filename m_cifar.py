@@ -113,7 +113,8 @@ def resnet(depth, width, num_classes):
         return o
 
     def f(input, params, mode, base=''):
-        x = F.conv2d(input, params['%sconv0'% base], padding=1)
+        # x = F.conv2d(input, params['%sconv0'% base], padding=1)
+        x = F.conv2d(input, params['{}conv0'.format(base)], padding=1)
         g0 = group(x, params, '%sgroup0'% base, mode, 1)
         g1 = group(g0, params, '{}group1'.format(base), mode, 2)
         g2 = group(g1, params, '{}group2'.format(base), mode, 2)
