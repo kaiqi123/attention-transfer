@@ -109,13 +109,12 @@ def resnet(depth, width, num_classes):
     def group(o, params, base, mode, stride):
         for i in range(n):
             # o = block(o, params, f'{base}.block{i}', mode, stride if i == 0 else 1)
-            o = block(o, params, "{}.block{}".format(base,i), mode, stride if i == 0 else 1)
+            o = block(o, params, '{}.block{}'.format(base, i), mode, stride if i == 0 else 1)
         return o
 
     def f(input, params, mode, base=''):
-        # x = F.conv2d(input, params['%sconv0'% base], padding=1)
         x = F.conv2d(input, params['{}conv0'.format(base)], padding=1)
-        g0 = group(x, params, '%sgroup0'% base, mode, 1)
+        g0 = group(x, params, '{}group0'.format(base), mode, 1)
         g1 = group(g0, params, '{}group1'.format(base), mode, 2)
         g2 = group(g1, params, '{}group2'.format(base), mode, 2)
         o = F.relu(utils.batch_norm(g2, params, '{}bn'.format(base), mode))
