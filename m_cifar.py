@@ -9,7 +9,8 @@ import torchvision.transforms as T
 from torchvision import datasets
 import torch.nn.functional as F
 import torchnet as tnt
-from torchnet.engine import Engine
+# from torchnet.engine import Engine
+from engine_utils import Engine
 from torch.utils.data import DataLoader
 import torch.backends.cudnn as cudnn
 import utils
