@@ -181,8 +181,8 @@ def main():
                 y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
                     y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
-                for key, value in out_dict_s.items(): print(key, value.shape)
-                for key, value in out_dict_t.items(): print(key, value.shape)
+                for key, value in sorted(out_dict_s.items()): print(key, value.shape)
+                for key, value in sorted(out_dict_t.items()): print(key, value.shape)
                 return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
         else:
             raise EOFError("Not found kt method.")
