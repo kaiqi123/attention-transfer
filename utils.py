@@ -77,7 +77,7 @@ def batch_norm(x, params, base, mode):
 
 def print_tensor_dict(params):
     kmax = max(len(key) for key in params.keys())
-    for i, (key, v) in enumerate(params.items()):
+    for i, (key, v) in enumerate(sorted(params.items())):
         print(str(i).ljust(5), key.ljust(kmax + 3), str(tuple(v.shape)).ljust(23), torch.typename(v), v.requires_grad)
 
 
