@@ -39,7 +39,7 @@ filenames = [f for f in os.listdir(dir) if type in f]
 plotLogs(dir, filenames)
 
 dir = "./logs/"
-filenames = ["cifar10_dependent_d10w10_bs512_3reluFc"]
+filenames = ["cifar10_dependent_d10w10_bs512_3reluFc", 'cifar10_dependent_d10w10_bs512_3reluFc_part2','training','cifar10_dependent_d10w10_bs512_onlyFc']
 plotLogs(dir, filenames)
 
 # dir = "./logs/cifar10/lr_cosine/"

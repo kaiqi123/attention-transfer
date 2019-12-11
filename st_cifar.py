@@ -235,7 +235,6 @@ def main():
                 y_s, y_t, loss_list = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
                 fc_loss = torch.sqrt(torch.mean((y_s - y_t) ** 2))
                 loss_list.append(fc_loss)
-                # loss_list = [v.sum() for v in loss_list]
                 [m.add(v.item()) for m, v in zip(meters_st, loss_list)]
                 return loss_list, y_s
         else:
