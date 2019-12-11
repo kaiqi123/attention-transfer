@@ -118,7 +118,7 @@ def resnet(depth, width, num_classes):
         g0, out_dict = group(x, params, '{}group0'.format(base), mode, 1, out_dict)
         g1, out_dict = group(g0, params, '{}group1'.format(base), mode, 2, out_dict)
         g2, out_dict = group(g1, params, '{}group2'.format(base), mode, 2, out_dict)
-        o = F.relu(utils.batch_norm(g2, params, '{}bn'.format(base), mode))
+        o = F.relu(utils.batch_norm(g2, params, '{}bn'.format(base), mode)); out_dict[base+"last_relu"]=o
         o = F.avg_pool2d(o, 8, 1, 0)
         o = o.view(o.size(0), -1)
         o = F.linear(o, params['{}fc.weight'.format(base)], params['{}fc.bias'.format(base)])
@@ -148,7 +148,6 @@ def main():
 
     # deal with student first
     f_s, params_s = resnet(opt.depth, opt.width, num_classes)
-    print(type(f_s), type(params_s))
 
     # deal with teacher
     if opt.teacher_id:
@@ -172,30 +171,31 @@ def main():
                     y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
                 return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
         elif opt.kt_method == "st":
-            # print('Set st:')
-            # print(relu_out_s.keys(), relu_out_t.keys())
-            # relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
-            # relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
-            # for key, value in relu_out_s.items(): print(key, value)
-            # for key, value in relu_out_t.items(): print(key, value)
             def f(inputs, params, mode):
                 y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
                     y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
-                for key, value in sorted(out_dict_s.items()): print(key, value.shape)
-                for key, value in sorted(out_dict_t.items()): print(key, value.shape)
-                return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
+                return y_s, y_t, utils.st_3relu_loss(out_dict_s, out_dict_t)
         else:
             raise EOFError("Not found kt method.")
 
     else:
         f, params = f_s, params_s
 
-    def create_optimizer(opt, lr):
-        # print('creating optimizer with lr = ', lr)
-        return SGD((v for v in params.values() if v.requires_grad), lr, momentum=0.9, weight_decay=opt.weight_decay)
+    def create_optimizer(opt, lr, sub_params):
+        print('creating optimizer with lr = {}, num of sub parameters: {}'.format(lr, sum(p.numel() for p in list(sub_params.values()))))
+        # group0: 256640, group1: 1434880, group2: 5736960,
+        # print('sub parameters:'); utils.print_tensor_dict(sub_params)
+        return SGD((v for v in sub_params.values() if v.requires_grad), lr, momentum=0.9, weight_decay=opt.weight_decay)
 
-    optimizer = create_optimizer(opt, opt.lr)
+    group0_params = {k: v for k, v in params.items() if 'student.group0.block0.conv' in k or 'student.group1.block0.bn0' in k}
+    group1_params = {k: v for k, v in params.items() if 'student.group1.block0.conv' in k or 'student.group2.block0.bn0' in k}
+    group2_params = {k: v for k, v in params.items() if 'student.group2.block0.conv' in k or 'student.bn.' in k}
+    group0_optimizer = create_optimizer(opt, opt.lr, sub_params=group0_params)
+    group1_optimizer = create_optimizer(opt, opt.lr, sub_params=group1_params)
+    group2_optimizer = create_optimizer(opt, opt.lr, sub_params=group2_params)
+    fc_optimizer = create_optimizer(opt, opt.lr, params)
+    optimizer_list = [group0_optimizer, group1_optimizer, group2_optimizer, fc_optimizer]
 
     epoch = 0
     if opt.resume != '':
@@ -206,8 +206,8 @@ def main():
             v.data.copy_(params_tensors[k])
         optimizer.load_state_dict(state_dict['optimizer'])
 
-    print('\nParameters:')
-    utils.print_tensor_dict(params)
+    # print('\nParameters:')
+    # utils.print_tensor_dict(params)
 
     n_parameters = sum(p.numel() for p in list(params_s.values()))
     print('\nTotal number of parameters:', n_parameters)
@@ -217,6 +217,7 @@ def main():
     timer_train = tnt.meter.TimeMeter('s')
     timer_test = tnt.meter.TimeMeter('s')
     meters_at = [tnt.meter.AverageValueMeter() for i in range(3)]
+    meters_st = [tnt.meter.AverageValueMeter() for i in range(len(optimizer_list))]
 
     if not os.path.exists(opt.save):
         os.mkdir(opt.save)
@@ -231,17 +232,19 @@ def main():
                 [m.add(v.item()) for m, v in zip(meters_at, loss_groups)]
                 return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) + opt.beta * sum(loss_groups), y_s
             elif opt.kt_method == "st":
-                y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
-                # loss_fc = tf.sqrt(tf.reduce_mean(tf.square(tf.subtract(teacher_output_dict["fc"], student_output_dict["fc"]))))
-                # return torch.sqrt(torch.nn.MSELoss(y_s, y_t) + 1e-6), y_s
-                return torch.sqrt(torch.mean((y_s-y_t)**2)), y_s
+                y_s, y_t, loss_list = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
+                fc_loss = torch.sqrt(torch.mean((y_s - y_t) ** 2))
+                loss_list.append(fc_loss)
+                # loss_list = [v.sum() for v in loss_list]
+                [m.add(v.item()) for m, v in zip(meters_st, loss_list)]
+                return loss_list, y_s
         else:
             y = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))[0]
             return F.cross_entropy(y, targets), y
 
     def log(t, state):
         torch.save(dict(params={k: v.data for k, v in params.items()},
-                        optimizer=state['optimizer'].state_dict(),
+                        optimizer=state['optimizer_list'][-1].state_dict(),
                         epoch=t['epoch']),
                    os.path.join(opt.save, 'model.pt7'))
         z = vars(opt).copy(); z.update(t)
@@ -269,13 +272,22 @@ def main():
         classacc.reset()
         meter_loss.reset()
         timer_train.reset()
-        [meter.reset() for meter in meters_at]
+        [meter.reset() for meter in meters_st]
         state['iterator'] = tqdm(train_loader)
 
         epoch = state['epoch'] + 1
         if epoch in epoch_step:
-            lr = state['optimizer'].param_groups[0]['lr']
-            state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
+            # lr = state['optimizer'].param_groups[0]['lr']
+            # state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
+
+            lr = state['optimizer_list'][-1].param_groups[0]['lr']
+            new_lr = lr * opt.lr_decay_ratio
+            group0_optimizer = create_optimizer(opt, new_lr, sub_params={k: v for k, v in params.items() if 'group0' in k})
+            group1_optimizer = create_optimizer(opt, new_lr, sub_params={k: v for k, v in params.items() if 'group1' in k})
+            group2_optimizer = create_optimizer(opt, new_lr, sub_params={k: v for k, v in params.items() if 'group2' in k})
+            fc_optimizer = create_optimizer(opt, new_lr, sub_params=params)
+            state['optimizer_list'] = [group0_optimizer, group1_optimizer, group2_optimizer, fc_optimizer]
+
 
     def on_end_epoch(state):
         train_loss = meter_loss.mean
@@ -298,9 +310,10 @@ def main():
             "n_parameters": n_parameters,
             "train_time": train_time,
             "test_time": timer_test.value(),
+            "st_losses": [m.value() for m in meters_st],
             "at_losses": [m.value() for m in meters_at],
             "kt_method": opt.kt_method,
-            "curr_lr": state['optimizer'].param_groups[0]['lr'],
+            "curr_lr": state['optimizer_list'][-1].param_groups[0]['lr'],
         }, state))
         print('==> id: %s (%d/%d), test_top1_acc: \33[91m%.2f\033[0m, test_top5_acc: \33[91m%.2f\033[0m' %
               (opt.save, state['epoch'], opt.epochs, test_acc[0], test_acc[1]))
@@ -311,7 +324,7 @@ def main():
     engine.hooks['on_start_epoch'] = on_start_epoch
     engine.hooks['on_end_epoch'] = on_end_epoch
     engine.hooks['on_start'] = on_start
-    engine.train(h, train_loader, opt.epochs, optimizer)
+    engine.train(h, train_loader, opt.epochs, optimizer_list)
 
     print("total time (h): {}".format((time.time()-st_total)/3600.))
 

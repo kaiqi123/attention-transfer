@@ -14,14 +14,14 @@ def plot_acc(log_name, frame, numParame, acc_type='test_acc', top_n='top_1'):
 
 
 def plotLogs(dir, log_names):
-    frames = [pd.DataFrame(sweeper.loadLog(dir+log + '/log.txt')) for log in log_names]
+    frames = [pd.DataFrame(sweeper.loadLog(dir + log + '/log.txt')) for log in log_names]
 
     for i, frame in enumerate(frames):
         log_name = log_names[i]
         numParame = round(float(frame["n_parameters"][0] / 1000000.), 2)
         plot_acc(log_name, frame, numParame, 'test_acc', 'top_1')
+        # plot_acc(log_name, frame, numParame, 'test_acc', 'top_5')
         # plot_acc(log_name, frame, numParame, 'train_acc', 'top_1')
-        plot_acc(log_name, frame, numParame, 'test_acc', 'top_5')
         # plot_acc(log_name, frame, numParame, 'train_acc', 'top_5')
 
     plt.xlabel("epoch")
@@ -38,10 +38,14 @@ type = "bs128"
 filenames = [f for f in os.listdir(dir) if type in f]
 plotLogs(dir, filenames)
 
-dir = "./logs/cifar10/lr_cosine/"
-type = "dependent"
-filenames = [f for f in os.listdir(dir) if type in f]
+dir = "./logs/"
+filenames = ["cifar10_dependent_d10w10_bs512_3reluFc"]
 plotLogs(dir, filenames)
+
+# dir = "./logs/cifar10/lr_cosine/"
+# type = "dependent"
+# filenames = [f for f in os.listdir(dir) if type in f]
+# plotLogs(dir, filenames)
 
 # dir = "./logs/imagenet/"
 # type = ""

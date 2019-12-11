@@ -7,6 +7,20 @@ from torch.nn.parallel import scatter, parallel_apply, gather
 import torch.nn.functional as F
 
 
+def rmse_loss(x, y):
+    return torch.sqrt(torch.mean((x-y)**2))
+
+
+def st_3relu_loss(out_dict_s, out_dict_t):
+    # out_dict_s = {k: v for k, v in out_dict_s.items() if 'relu2' not in k}
+    # for key, value in sorted(out_dict_s.items()): print(key, value.shape)
+    # for key, value in sorted(out_dict_t.items()): print(key, value.shape)
+    loss_group1 = rmse_loss(out_dict_s['student.group1.block0.relu1'], out_dict_t['teacher.group1.block0.relu1'])
+    loss_group2 = rmse_loss(out_dict_s['student.group2.block0.relu1'], out_dict_t['teacher.group2.block0.relu1'])
+    loss_last_relu = rmse_loss(out_dict_s['student.last_relu'], out_dict_t['teacher.last_relu'])
+    return [loss_group1, loss_group2, loss_last_relu]
+
+
 def distillation(y, teacher_scores, labels, T, alpha):
     p = F.log_softmax(y/T, dim=1)
     q = F.softmax(teacher_scores/T, dim=1)
