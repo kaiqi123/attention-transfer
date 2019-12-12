@@ -30,16 +30,16 @@ def plotLogs(dir, log_names):
     plt.show()
 
 
-# plotLogs(['WRN-d28-w10'])
 os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/')
 
-dir = "./logs/cifar10/lr_decay/"
-type = "bs128"
-filenames = [f for f in os.listdir(dir) if type in f]
-plotLogs(dir, filenames)
-
 dir = "./logs/"
-filenames = ["cifar10_dependent_d10w10_bs512_3reluFc", 'cifar10_dependent_d10w10_bs512_3reluFc_part2','training','cifar10_dependent_d10w10_bs512_onlyFc']
+filenames = [
+            "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm",
+            "cifar10_dependent_d10w10_bs128_onlyFc",
+            # "cifar10_dependent_d10w10_bs128_at",
+            'cifar10_independent_d10w10_bs128',
+            "cifar10_teacher_d28w10_bs128",
+            ]
 plotLogs(dir, filenames)
 
 # dir = "./logs/cifar10/lr_cosine/"

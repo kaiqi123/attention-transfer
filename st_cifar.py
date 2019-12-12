@@ -103,8 +103,8 @@ def resnet(depth, width, num_classes):
             o = z + F.conv2d(o1, params[base + '.convdim'], stride=stride)
         else:
             o = z + x
-        out_dict[base+'.relu1'] = o1
-        out_dict[base+'.relu2'] = o2
+        out_dict[base+'.relu0'] = o1
+        out_dict[base+'.relu1'] = o2
         return o, out_dict
 
     def group(o, params, base, mode, stride, out_dict):
@@ -175,7 +175,8 @@ def main():
                 y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
                     y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
-                return y_s, y_t, utils.st_3relu_loss(out_dict_s, out_dict_t)
+                # return y_s, y_t, utils.st_3relu_loss(out_dict_s, out_dict_t)
+                return y_s, y_t, utils.st_3relu_loss_cosine(out_dict_s, out_dict_t)
         else:
             raise EOFError("Not found kt method.")
 
@@ -185,12 +186,17 @@ def main():
     def create_optimizer(opt, lr, sub_params):
         print('creating optimizer with lr = {}, num of sub parameters: {}'.format(lr, sum(p.numel() for p in list(sub_params.values()))))
         # group0: 256640, group1: 1434880, group2: 5736960,
-        # print('sub parameters:'); utils.print_tensor_dict(sub_params)
+        print('sub parameters:'); utils.print_tensor_dict(sub_params)
         return SGD((v for v in sub_params.values() if v.requires_grad), lr, momentum=0.9, weight_decay=opt.weight_decay)
 
-    group0_params = {k: v for k, v in params.items() if 'student.group0.block0.conv' in k or 'student.group1.block0.bn0' in k}
-    group1_params = {k: v for k, v in params.items() if 'student.group1.block0.conv' in k or 'student.group2.block0.bn0' in k}
-    group2_params = {k: v for k, v in params.items() if 'student.group2.block0.conv' in k or 'student.bn.' in k}
+    group0_params = {k: v for k, v in params.items() if 'student.group0.block0.conv' in k or 'student.group0.block0.bn1' in k or 'student.group1.block0.bn0' in k}
+    group1_params = {k: v for k, v in params.items() if 'student.group1.block0.conv' in k or 'student.group1.block0.bn1' in k or 'student.group2.block0.bn0' in k}
+    group2_params = {k: v for k, v in params.items() if 'student.group2.block0.conv' in k or 'student.group2.block0.bn1' in k or 'student.bn.' in k}
+
+    # group0_params = {k: v for k, v in params.items() if 'student.group0.block0.conv' in k}
+    # group1_params = {k: v for k, v in params.items() if 'student.group1.block0.conv' in k}
+    # group2_params = {k: v for k, v in params.items() if 'student.group2.block0.conv' in k}
+
     group0_optimizer = create_optimizer(opt, opt.lr, sub_params=group0_params)
     group1_optimizer = create_optimizer(opt, opt.lr, sub_params=group1_params)
     group2_optimizer = create_optimizer(opt, opt.lr, sub_params=group2_params)

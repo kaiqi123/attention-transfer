@@ -9,8 +9,7 @@ import torchvision.transforms as T
 from torchvision import datasets
 import torch.nn.functional as F
 import torchnet as tnt
-# from torchnet.engine import Engine
-from engine_utils import Engine
+from torchnet.engine import Engine
 from torch.utils.data import DataLoader
 import torch.backends.cudnn as cudnn
 import utils
@@ -48,6 +47,7 @@ parser.add_argument('--gpu_id', default='0', type=str, help='id(s) for CUDA_VISI
 
 # KT methods options
 parser.add_argument('--kt_method', default='#', type=str, help="at,st,kd")
+
 
 def create_dataset(opt, train):
     transform = T.Compose([
@@ -94,7 +94,7 @@ def resnet(depth, width, num_classes):
 
     utils.set_requires_grad_except_bn_(flat_params)
 
-    def block(x, params, base, mode, stride, out_dict):
+    def block(x, params, base, mode, stride):
         o1 = F.relu(utils.batch_norm(x, params, base + '.bn0', mode), inplace=True)
         y = F.conv2d(o1, params[base + '.conv0'], stride=stride, padding=1)
         o2 = F.relu(utils.batch_norm(y, params, base + '.bn1', mode), inplace=True)
@@ -103,26 +103,23 @@ def resnet(depth, width, num_classes):
             o = z + F.conv2d(o1, params[base + '.convdim'], stride=stride)
         else:
             o = z + x
-        out_dict[base+'.relu1'] = o1
-        out_dict[base+'.relu2'] = o2
-        return o, out_dict
+        return o
 
-    def group(o, params, base, mode, stride, out_dict):
+    def group(o, params, base, mode, stride):
         for i in range(n):
-            o, out_dict = block(o, params, '{}.block{}'.format(base, i), mode, stride if i == 0 else 1, out_dict)
-        return o, out_dict
+            o = block(o, params, '{}.block{}'.format(base, i), mode, stride if i == 0 else 1)
+        return o
 
     def f(input, params, mode, base=''):
-        out_dict = {}
         x = F.conv2d(input, params['{}conv0'.format(base)], padding=1)
-        g0, out_dict = group(x, params, '{}group0'.format(base), mode, 1, out_dict)
-        g1, out_dict = group(g0, params, '{}group1'.format(base), mode, 2, out_dict)
-        g2, out_dict = group(g1, params, '{}group2'.format(base), mode, 2, out_dict)
-        o = F.relu(utils.batch_norm(g2, params, '{}bn'.format(base), mode)); out_dict["last_relu"]=o
+        g0 = group(x, params, '{}group0'.format(base), mode, 1)
+        g1 = group(g0, params, '{}group1'.format(base), mode, 2)
+        g2 = group(g1, params, '{}group2'.format(base), mode, 2)
+        o = F.relu(utils.batch_norm(g2, params, '{}bn'.format(base), mode))
         o = F.avg_pool2d(o, 8, 1, 0)
         o = o.view(o.size(0), -1)
         o = F.linear(o, params['{}fc.weight'.format(base)], params['{}fc.bias'.format(base)])
-        return o, (g0, g1, g2), out_dict
+        return o, (g0, g1, g2)
 
     return f, flat_params
 
@@ -167,22 +164,16 @@ def main():
 
         if opt.kt_method == "at":
             def f(inputs, params, mode):
-                y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
+                y_s, g_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
-                    y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
+                    y_t, g_t = f_t(inputs, params, False, 'teacher.')
                 return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
         elif opt.kt_method == "st":
-            # print('Set st:')
-            # print(relu_out_s.keys(), relu_out_t.keys())
-            # relu_out_s = {'student.' + k: v for k, v in relu_out_s.items()}
-            # relu_out_t = {'teacher.' + k: v for k, v in relu_out_t.items()}
-            # for key, value in relu_out_s.items(): print(key, value)
-            # for key, value in relu_out_t.items(): print(key, value)
             def f(inputs, params, mode):
-                y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
+                y_s, g_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
-                    y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
-                return y_s, y_t, utils.st_3relu_loss(out_dict_s, out_dict_t)
+                    y_t, g_t = f_t(inputs, params, False, 'teacher.')
+                return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
         else:
             raise EOFError("Not found kt method.")
 
@@ -229,10 +220,8 @@ def main():
                 [m.add(v.item()) for m, v in zip(meters_at, loss_groups)]
                 return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) + opt.beta * sum(loss_groups), y_s
             elif opt.kt_method == "st":
-                y_s, y_t, relu_loss_list = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
-                fc_loss = torch.sqrt(torch.mean((y_s - y_t) ** 2))
-                loss_list = relu_loss_list + fc_loss
-                return loss_list, y_s
+                y_s, y_t, loss_groups = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
+                return torch.sqrt(torch.mean((y_s - y_t) ** 2)), y_s
         else:
             y = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))[0]
             return F.cross_entropy(y, targets), y

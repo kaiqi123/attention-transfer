@@ -7,17 +7,54 @@ from torch.nn.parallel import scatter, parallel_apply, gather
 import torch.nn.functional as F
 
 
-def rmse_loss(x, y):
-    return torch.sqrt(torch.mean((x-y)**2))
+def norm_rmse_loss_cosine(s, t_dict):
+    def cosineSimilarity(x1, x2):
+        x1_sqrt = torch.sqrt(torch.sum(x1 ** 2))
+        x2_sqrt = torch.sqrt(torch.sum(x2 ** 2))
+        return torch.div(torch.sum(x1 * x2), max(x1_sqrt * x2_sqrt, 1e-8))
+
+    # print(s.shape)
+    s_norm = F.normalize(s, p=2, dim=0)
+    t_norm_dict = {}
+    simi_dict = {}
+    for k, v in t_dict.items():
+        if s_norm.shape == v.shape:
+            v_norm = F.normalize(v, p=2, dim=0)
+            t_norm_dict[k] = v_norm
+            simi_dict[k] = cosineSimilarity(s_norm, v_norm)
+            # print("t_dict: {}, {}".format(k, v.shape))
+    max_key = sorted(simi_dict.items(), key=lambda x: x[1], reverse=True).pop()[0]
+    t_norm = t_norm_dict[max_key]
+    # for k, v in t_norm_dict.items(): print("t_norm_dict: {}, {}".format(k, v.shape))
+    # for k, v in simi_dict.items(): print("simi_dict: {}, {}".format(k, v))
+    # print("max similarity: {}, {}, {}".format(max_key, simi_dict[max_key], t_norm.shape))
+    return torch.sqrt(torch.mean((s_norm-t_norm)**2))
+
+
+def st_3relu_loss_cosine(out_dict_s, out_dict_t):
+    # out_dict_s = {k: v for k, v in out_dict_s.items() if 'relu2' not in k}
+    # for key, value in sorted(out_dict_s.items()): print(key, value.shape)
+    # for key, value in sorted(out_dict_t.items()): print(key, value.shape)
+    loss_group1 = norm_rmse_loss_cosine(out_dict_s['student.group1.block0.relu0'], out_dict_t)
+    loss_group2 = norm_rmse_loss_cosine(out_dict_s['student.group2.block0.relu0'], out_dict_t)
+    loss_last_relu = norm_rmse_loss_cosine(out_dict_s['student.last_relu'], out_dict_t)
+    return [loss_group1, loss_group2, loss_last_relu]
+
+
+def norm_rmse_loss(s, t):
+    assert s.size() == t.size()
+    s_norm = F.normalize(s, p=2, dim=0)
+    t_norm = F.normalize(t, p=2, dim=0)
+    return torch.sqrt(torch.mean((s_norm-t_norm)**2))
 
 
 def st_3relu_loss(out_dict_s, out_dict_t):
     # out_dict_s = {k: v for k, v in out_dict_s.items() if 'relu2' not in k}
     # for key, value in sorted(out_dict_s.items()): print(key, value.shape)
     # for key, value in sorted(out_dict_t.items()): print(key, value.shape)
-    loss_group1 = rmse_loss(out_dict_s['student.group1.block0.relu1'], out_dict_t['teacher.group1.block0.relu1'])
-    loss_group2 = rmse_loss(out_dict_s['student.group2.block0.relu1'], out_dict_t['teacher.group2.block0.relu1'])
-    loss_last_relu = rmse_loss(out_dict_s['student.last_relu'], out_dict_t['teacher.last_relu'])
+    loss_group1 = norm_rmse_loss(out_dict_s['student.group1.block0.relu0'], out_dict_t['teacher.group1.block0.relu0'])
+    loss_group2 = norm_rmse_loss(out_dict_s['student.group2.block0.relu0'], out_dict_t['teacher.group2.block0.relu0'])
+    loss_last_relu = norm_rmse_loss(out_dict_s['student.last_relu'], out_dict_t['teacher.last_relu'])
     return [loss_group1, loss_group2, loss_last_relu]
 
 
