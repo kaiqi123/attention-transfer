@@ -15,8 +15,9 @@ from torch.utils.data import DataLoader
 import torch.backends.cudnn as cudnn
 import utils
 import time
-cudnn.benchmark = True
 
+
+cudnn.benchmark = True
 parser = argparse.ArgumentParser(description='Wide Residual Networks')
 # Model options
 parser.add_argument('--depth', default=16, type=int)
@@ -48,6 +49,7 @@ parser.add_argument('--gpu_id', default='0', type=str, help='id(s) for CUDA_VISI
 
 # KT methods options
 parser.add_argument('--kt_method', default='#', type=str, help="at,st,kd")
+
 
 def create_dataset(opt, train):
     transform = T.Compose([
@@ -175,8 +177,8 @@ def main():
                 y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
                 with torch.no_grad():
                     y_t, g_t, out_dict_t = f_t(inputs, params, False, 'teacher.')
-                # return y_s, y_t, utils.st_3relu_loss(out_dict_s, out_dict_t)
-                return y_s, y_t, utils.st_3relu_loss_cosine(out_dict_s, out_dict_t)
+                return y_s, y_t, utils.st_3relu_loss(out_dict_s, out_dict_t)
+                # return y_s, y_t, utils.st_3relu_loss_cosine(out_dict_s, out_dict_t)
         else:
             raise EOFError("Not found kt method.")
 
@@ -184,9 +186,9 @@ def main():
         f, params = f_s, params_s
 
     def create_optimizer(opt, lr, sub_params):
-        print('creating optimizer with lr = {}, num of sub parameters: {}'.format(lr, sum(p.numel() for p in list(sub_params.values()))))
+        # print('creating optimizer with lr = {}, num of sub parameters: {}'.format(lr, sum(p.numel() for p in list(sub_params.values()))))
         # group0: 256640, group1: 1434880, group2: 5736960,
-        print('sub parameters:'); utils.print_tensor_dict(sub_params)
+        # print('sub parameters:'); utils.print_tensor_dict(sub_params)
         return SGD((v for v in sub_params.values() if v.requires_grad), lr, momentum=0.9, weight_decay=opt.weight_decay)
 
     group0_params = {k: v for k, v in params.items() if 'student.group0.block0.conv' in k or 'student.group0.block0.bn1' in k or 'student.group1.block0.bn0' in k}
@@ -239,9 +241,10 @@ def main():
                 return utils.distillation(y_s, y_t, targets, opt.temperature, opt.alpha) + opt.beta * sum(loss_groups), y_s
             elif opt.kt_method == "st":
                 y_s, y_t, loss_list = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))
+                loss_list = [v.sum() for v in loss_list]
+                [m.add(v.item()) for m, v in zip(meters_st, loss_list)]
                 fc_loss = torch.sqrt(torch.mean((y_s - y_t) ** 2))
                 loss_list.append(fc_loss)
-                [m.add(v.item()) for m, v in zip(meters_st, loss_list)]
                 return loss_list, y_s
         else:
             y = utils.data_parallel(f, inputs, params, sample[2], range(opt.ngpu))[0]
@@ -261,9 +264,13 @@ def main():
     def on_sample(state):
         state['sample'].append(state['train'])
 
-        # if state['sample'][2]:
-        #     curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
-        #     state['optimizer'] = create_optimizer(opt, curr_lr)
+        if state['sample'][2]:
+            new_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
+            group0_optimizer = create_optimizer(opt, new_lr, sub_params=group0_params)
+            group1_optimizer = create_optimizer(opt, new_lr, sub_params=group1_params)
+            group2_optimizer = create_optimizer(opt, new_lr, sub_params=group2_params)
+            fc_optimizer = create_optimizer(opt, new_lr, sub_params=params)
+            state['optimizer_list'] = [group0_optimizer, group1_optimizer, group2_optimizer, fc_optimizer]
         # print(len(state['sample']), state['sample'][0].size(), state['sample'][1].size(), state['sample'][2])
 
     def on_forward(state):
@@ -280,18 +287,18 @@ def main():
         [meter.reset() for meter in meters_st]
         state['iterator'] = tqdm(train_loader)
 
-        epoch = state['epoch'] + 1
-        if epoch in epoch_step:
-            # lr = state['optimizer'].param_groups[0]['lr']
-            # state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
-
-            lr = state['optimizer_list'][-1].param_groups[0]['lr']
-            new_lr = lr * opt.lr_decay_ratio
-            group0_optimizer = create_optimizer(opt, new_lr, sub_params={k: v for k, v in params.items() if 'group0' in k})
-            group1_optimizer = create_optimizer(opt, new_lr, sub_params={k: v for k, v in params.items() if 'group1' in k})
-            group2_optimizer = create_optimizer(opt, new_lr, sub_params={k: v for k, v in params.items() if 'group2' in k})
-            fc_optimizer = create_optimizer(opt, new_lr, sub_params=params)
-            state['optimizer_list'] = [group0_optimizer, group1_optimizer, group2_optimizer, fc_optimizer]
+        # epoch = state['epoch'] + 1
+        # if epoch in epoch_step:
+        #     # lr = state['optimizer'].param_groups[0]['lr']
+        #     # state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
+        #
+        #     lr = state['optimizer_list'][-1].param_groups[0]['lr']
+        #     new_lr = lr * opt.lr_decay_ratio
+        #     group0_optimizer = create_optimizer(opt, new_lr, sub_params=group0_params)
+        #     group1_optimizer = create_optimizer(opt, new_lr, sub_params=group1_params)
+        #     group2_optimizer = create_optimizer(opt, new_lr, sub_params=group2_params)
+        #     fc_optimizer = create_optimizer(opt, new_lr, sub_params=params)
+        #     state['optimizer_list'] = [group0_optimizer, group1_optimizer, group2_optimizer, fc_optimizer]
 
 
     def on_end_epoch(state):

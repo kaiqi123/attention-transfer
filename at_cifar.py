@@ -240,9 +240,9 @@ def main():
     def on_sample(state):
         state['sample'].append(state['train'])
 
-        # if state['sample'][2]:
-        #     curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
-        #     state['optimizer'] = create_optimizer(opt, curr_lr)
+        if state['sample'][2]:
+            curr_lr = 0.5 * opt.lr * (1 + np.cos(np.pi * state['t'] / total_steps))
+            state['optimizer'] = create_optimizer(opt, curr_lr)
         # print(len(state['sample']), state['sample'][0].size(), state['sample'][1].size(), state['sample'][2])
 
     def on_forward(state):
@@ -259,10 +259,10 @@ def main():
         [meter.reset() for meter in meters_at]
         state['iterator'] = tqdm(train_loader)
 
-        epoch = state['epoch'] + 1
-        if epoch in epoch_step:
-            lr = state['optimizer'].param_groups[0]['lr']
-            state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
+        # epoch = state['epoch'] + 1
+        # if epoch in epoch_step:
+        #     lr = state['optimizer'].param_groups[0]['lr']
+        #     state['optimizer'] = create_optimizer(opt, lr * opt.lr_decay_ratio)
 
     def on_end_epoch(state):
         train_loss = meter_loss.mean

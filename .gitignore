@@ -1,4 +1,5 @@
 logs
 cifar-10-python.tar.gz
-resnet-34-export.pth
 cifar-10-batches-py
+resnet-34-export.pth
+wrn-50-2.t7

@@ -32,19 +32,27 @@ def plotLogs(dir, log_names):
 
 os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/')
 
+# dir = "./logs/cifar10/lr_decay/bs128/complete_1gpu/"
+# type = "dependent"
+# filenames = [f for f in os.listdir(dir) if type in f]
+# plotLogs(dir, filenames)
+
 dir = "./logs/"
 filenames = [
-            "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm",
-            "cifar10_dependent_d10w10_bs128_onlyFc",
-            # "cifar10_dependent_d10w10_bs128_at",
-            'cifar10_independent_d10w10_bs128',
-            "cifar10_teacher_d28w10_bs128",
+            # "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm_1gpu_cosine_teacherCosine",
+            # "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm_1gpu_lrCosine",
+            "cifar10_dependent_d10w10_bs128_onlyFc_1gpu_cosine_teacherCosine",
+            'cifar10_dependent_d10w10_bs128_onlyFc_lrCosine',
+            # "cifar10_independent_d10w10_bs128_lrCosine",
+            # 'cifar10_teacher_d28w10_bs128_lrCosine',
             ]
 plotLogs(dir, filenames)
 
-# dir = "./logs/cifar10/lr_cosine/"
-# type = "dependent"
-# filenames = [f for f in os.listdir(dir) if type in f]
+# dir = "./logs/"
+# filenames = [
+#             "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm",
+#             "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm_4gpu",
+#             ]
 # plotLogs(dir, filenames)
 
 # dir = "./logs/imagenet/"
