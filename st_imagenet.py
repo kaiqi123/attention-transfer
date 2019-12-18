@@ -101,21 +101,21 @@ def define_teacher(params_file):
         o = input
         for i in range(0, n):
             b_base = ('%s.block%d.conv') % (base, i)
-            print(b_base)
+            # print(b_base)
             x = o
             o = conv2d(x, params, b_base + '0')
             o = F.relu(o)
-            print(o.shape)
+            # print(o.shape)
             o = conv2d(o, params, b_base + '1', stride=i == 0 and stride or 1, pad=1)
             o = F.relu(o)
-            print(o.shape)
+            # print(o.shape)
             o = conv2d(o, params, b_base + '2')
             if i == 0:
                 o += conv2d(x, params, b_base + '_dim', stride=stride)
             else:
                 o += x
             o = F.relu(o)
-            print(o.shape)
+            # print(o.shape)
         return o
 
 
@@ -123,20 +123,20 @@ def define_teacher(params_file):
         # o = F.conv2d(input, params['conv0.weight'], params['conv0.bias'], 2, 3)
         o = conv2d(input, params, pr+'conv0', 2, 3)
         o = F.relu(o)
-        print(o.shape)
+        # print(o.shape)
         o = F.max_pool2d(o, 3, 2, 1)
-        print(o.shape)
+        # print(o.shape)
         o_g0 = group(o, params, pr+'group0', 1, blocks[0])
         o_g1 = group(o_g0, params, pr+'group1', 2, blocks[1])
         o_g2 = group(o_g1, params, pr+'group2', 2, blocks[2])
         o_g3 = group(o_g2, params, pr+'group3', 2, blocks[3])
-        print(o_g0.shape, o_g1.shape, o_g2.shape, o_g3.shape)
+        # print(o_g0.shape, o_g1.shape, o_g2.shape, o_g3.shape)
         o = F.avg_pool2d(o_g3, 7, 1, 0)
-        print(o.shape)
+        # print(o.shape)
         o = o.view(o.size(0), -1)
-        print(o.shape)
+        # print(o.shape)
         o = F.linear(o, params[pr+'fc.weight'], params[pr+'fc.bias'])
-        print(o.shape)
+        # print(o.shape)
         return o, (o_g0, o_g1, o_g2, o_g3)
 
     return f, params
