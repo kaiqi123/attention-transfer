@@ -15,17 +15,18 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import utils
 from collections import OrderedDict
+from torch.autograd import Variable
+
 import time
-from wide_resnet_50_2 import define_model
 
 cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(description='Wide Residual Networks')
 # Model options
 parser.add_argument('--dtype', default='float', type=str)
-parser.add_argument('--depth', default=-1, type=int)
-parser.add_argument('--width', default=-1, type=float)
-parser.add_argument('--imagenetpath', default='#', type=str)
+parser.add_argument('--depth', default=18, type=int)
+parser.add_argument('--width', default=1, type=float)
+parser.add_argument('--imagenetpath', default='/home/zagoruys/ILSVRC2012', type=str)
 parser.add_argument('--nthread', default=4, type=int)
 parser.add_argument('--teacher_params', default='', type=str)
 parser.add_argument('--teacher_id', default='', type=str)
@@ -44,7 +45,7 @@ parser.add_argument('--beta', default=0, type=float)
 
 # Device options
 parser.add_argument('--cuda', action='store_true')
-parser.add_argument('--save', default='#', type=str,help='save parameters and logs in this folder')
+parser.add_argument('--save', default='', type=str,help='save parameters and logs in this folder')
 parser.add_argument('--ngpu', default=1, type=int,help='number of GPUs to use for training')
 parser.add_argument('--gpu_id', default='0', type=str,help='id(s) for CUDA_VISIBLE_DEVICES')
 
@@ -78,37 +79,143 @@ def get_iterator(imagenetpath, batch_size, nthread, mode):
     return DataLoader(ds, batch_size=batch_size, shuffle=mode,num_workers=nthread, pin_memory=True)
 
 
+def define_teacher(params_file):
+    """
+    pretrained wide-resnet-50-2: wget https://s3.amazonaws.com/modelzoo-networks/wide-resnet-50-2-export-5ae25d50.pth
+    """
+    params = torch.load(params_file)
+    for k, v in sorted(params.items()):
+        # print(k, tuple(v.shape))
+        params[k] = Variable(v, requires_grad=True)
+    print('\nTeacher wide-resnet-50-2 Total parameters:', sum(v.numel() for v in params.values()))
+
+    blocks = [sum([re.match('group%d.block\d+.conv0.weight' % j, k) is not None
+                   for k in params.keys()]) for j in range(4)]
+
+    def conv2d(input, params, base, stride=1, pad=0):
+        return F.conv2d(input, params[base + '.weight'], params[base + '.bias'], stride, pad)
+
+    def group(input, params, base, stride, n):
+        o = input
+        for i in range(0, n):
+            b_base = ('%s.block%d.conv') % (base, i)
+            x = o
+            o = conv2d(x, params, b_base + '0')
+            o = F.relu(o)
+            o = conv2d(o, params, b_base + '1', stride=i == 0 and stride or 1, pad=1)
+            o = F.relu(o)
+            o = conv2d(o, params, b_base + '2')
+            if i == 0:
+                o += conv2d(x, params, b_base + '_dim', stride=stride)
+            else:
+                o += x
+            o = F.relu(o)
+        return o
+
+
+    def f(input, params, pr=''):
+        # o = F.conv2d(input, params['conv0.weight'], params['conv0.bias'], 2, 3)
+        o = conv2d(input, params, pr+'conv0', 2, 3)
+        o = F.relu(o)
+        o = F.max_pool2d(o, 3, 2, 1)
+        o_g0 = group(o, params, pr+'group0', 1, blocks[0])
+        o_g1 = group(o_g0, params, pr+'group1', 2, blocks[1])
+        o_g2 = group(o_g1, params, pr+'group2', 2, blocks[2])
+        o_g3 = group(o_g2, params, pr+'group3', 2, blocks[3])
+        o = F.avg_pool2d(o_g3, 7, 1, 0)
+        o = o.view(o.size(0), -1)
+        o = F.linear(o, params[pr+'fc.weight'], params[pr+'fc.bias'])
+        return o, (o_g0, o_g1, o_g2, o_g3)
+
+    return f, params
+
+
+def define_student(depth, width):
+    definitions = {18: [2,2,2,2],
+                   34: [3,4,6,5]}
+    assert depth in list(definitions.keys())
+    widths = [int(w * width) for w in (64, 128, 256, 512)]
+    blocks = definitions[depth]
+
+    def gen_block_params(ni, no):
+        return {'conv0': utils.conv_params(ni, no, 3),
+                'conv1': utils.conv_params(no, no, 3),
+                'bn0': utils.bnparams(no),
+                'bn1': utils.bnparams(no),
+                'convdim': utils.conv_params(ni, no, 1) if ni != no else None,
+                }
+
+    def gen_group_params(ni, no, count):
+        return {'block%d'%i: gen_block_params(ni if i==0 else no, no)
+                for i in range(count)}
+
+    flat_params = OrderedDict(utils.flatten({
+        'conv0': utils.conv_params(3, 64, 7),
+        'bn0': utils.bnparams(64),
+        'group0': gen_group_params(64, widths[0], blocks[0]),
+        'group1': gen_group_params(widths[0], widths[1], blocks[1]),
+        'group2': gen_group_params(widths[1], widths[2], blocks[2]),
+        'group3': gen_group_params(widths[2], widths[3], blocks[3]),
+        'fc': utils.linear_params(widths[3], 1000),
+    }))
+
+    utils.set_requires_grad_except_bn_(flat_params)
+
+    def block(x, params, base, mode, stride):
+        y = F.conv2d(x, params[base+'.conv0'], stride=stride, padding=1)
+        o1 = F.relu(utils.batch_norm(y, params, base+'.bn0', mode), inplace=True)
+        z = F.conv2d(o1, params[base+'.conv1'], stride=1, padding=1)
+        o2 = utils.batch_norm(z, params, base+'.bn1', mode)
+        if base + '.convdim' in params:
+            return F.relu(o2 + F.conv2d(x, params[base+'.convdim'], stride=stride), inplace=True)
+        else:
+            return F.relu(o2 + x, inplace=True)
+
+    def group(o, params, base, mode, stride, n):
+        for i in range(n):
+            o = block(o, params, '%s.block%d' % (base, i), mode, stride if i == 0 else 1)
+        return o
+
+    def f(input, params, mode, pr=''):
+        o = F.conv2d(input, params[pr+'conv0'], stride=2, padding=3)
+        o = F.relu(utils.batch_norm(o, params, pr+'bn0', mode), inplace=True)
+        o = F.max_pool2d(o, 3, 2, 1)
+        g0 = group(o, params, pr+'group0', mode, 1, blocks[0])
+        g1 = group(g0, params, pr+'group1', mode, 2, blocks[1])
+        g2 = group(g1, params, pr+'group2', mode, 2, blocks[2])
+        g3 = group(g2, params, pr+'group3', mode, 2, blocks[3])
+        o = F.avg_pool2d(g3, 7)
+        o = o.view(o.size(0), -1)
+        o = F.linear(o, params[pr+'fc.weight'], params[pr+'fc.bias'])
+        return o, [g0, g1, g2, g3]
+
+    return f, flat_params
+
+
 def main():
     st = time.time()
     opt = parser.parse_args()
     epoch_step = json.loads(opt.epoch_step)
     print('parsed options:', vars(opt))
-    epoch_step = json.loads(opt.epoch_step)
-    num_classes = 1000
-    if not os.path.exists(opt.save):
-        os.mkdir(opt.save)
 
     os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_id
 
-    # f_s, params_s = define_student(opt.depth, opt.width)
-    f_s, params_s = wide_resnet(opt.depth, opt.width, num_classes)
+    epoch_step = json.loads(opt.epoch_step)
+
+    if not os.path.exists(opt.save):
+        os.mkdir(opt.save)
+
+    f_s, params_s = define_student(opt.depth, opt.width)
 
     if opt.teacher_id:
-        # f_t, params_t = define_teacher(opt.teacher_params)
-        with open(os.path.join('logs', opt.teacher_id, 'log.txt'), 'r') as ff:
-            line = ff.readline()
-            r = line.find('json_stats')
-            info = json.loads(line[r + 12:])
-        f_t, _ = wide_resnet(info['depth'], info['width'], num_classes)
-        model_data = torch.load(os.path.join('logs', opt.teacher_id, 'model.pt7'))
-        params_t = model_data['params']
-
+        assert opt.teacher_id == "resnet-50-2"
+        f_t, params_t = define_teacher(opt.teacher_params)
         params = {'student.'+k: v for k, v in params_s.items()}
         params.update({'teacher.'+k: v for k, v in params_t.items()})
         def f(inputs, params, mode):
-            y_s, g_s, out_dict_s = f_s(inputs, params, mode, 'student.')
+            y_s, g_s = f_s(inputs, params, mode, 'student.')
             with torch.no_grad():
-                y_t, g_t, out_dict_t = f_t(inputs, params, 'teacher.')
+                y_t, g_t = f_t(inputs, params, 'teacher.')
             return y_s, y_t, [utils.at_loss(x, y) for x, y in zip(g_s, g_t)]
     else:
         f, params = f_s, params_s
@@ -124,12 +231,11 @@ def main():
 
     iter_train = get_iterator(opt.imagenetpath, opt.batch_size, opt.nthread, True)
     iter_test = get_iterator(opt.imagenetpath, opt.batch_size, opt.nthread, False)
-    train_size = len(iter_train.dataset)
-    test_size = len(iter_test.dataset)
-    steps_per_epoch = round(train_size / opt.batch_size)
-    total_steps = opt.epochs * steps_per_epoch
-    print("train size: {}, test size: {}, steps per epoch: {}, total steps: {}".
-          format(train_size, test_size, steps_per_epoch, total_steps))
+    # train_size = len(iter_train.dataset)
+    # test_size = len(iter_test.dataset)
+    # steps_per_epoch = round(train_size / opt.batch_size)
+    # total_steps = opt.epochs * steps_per_epoch
+    # print("train size: {}, test size: {}, steps per epoch: {}, total steps: {}".format(train_size, test_size, steps_per_epoch, total_steps))
 
     epoch = 0
     if opt.resume != '':
@@ -159,13 +265,12 @@ def main():
             for i, (inputs, targets) in enumerate(iter_test):
                 inputs = inputs.cuda().detach()
                 targets = targets.cuda().long().detach()
-                y_t, _, _ = f_t(inputs, params, 'teacher.')
+                # y_t, _ = f_t(inputs, params, 'teacher.')
+                y_t = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))[1]
                 classacc_t.add(y_t, targets)
-                t_test_acc_top1.append(classacc_t.value()[0])
-                t_test_acc_top5.append(classacc_t.value()[1])
+                t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
                 classacc_t.reset()
-        print("teacher top1 test acc: {}, teacher top5 test acc: {}".
-              format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
+        print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
 
     def h(sample):
         inputs, targets, mode = sample

@@ -4,13 +4,7 @@ from torch.autograd import Variable
 from torch.utils import model_zoo
 import torch
 
-params = model_zoo.load_url('https://s3.amazonaws.com/modelzoo-networks/wide-resnet-50-2-export-5ae25d50.pth')
-# model = torch.hub.load('pytorch/vision:v0.4.2', 'wide_resnet50_2', pretrained=True)
-for k, v in sorted(params.items()):
-    print(k, tuple(v.shape))
-    params[k] = Variable(v, requires_grad=True)
 
-print('\nTotal parameters:', sum(v.numel() for v in params.values()))
 
 
 def define_model(params):
