@@ -271,19 +271,19 @@ def main():
     meters_at = [tnt.meter.AverageValueMeter() for i in range(4)]
 
     # check teacher test accuracy
-    # if opt.teacher_id != '':
-    #     classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
-    #     t_test_acc_top1, t_test_acc_top5 = [], []
-    #     with torch.no_grad():
-    #         for i, (inputs, targets) in enumerate(iter_test):
-    #             inputs = inputs.cuda().detach()
-    #             targets = targets.cuda().long().detach()
-    #             # y_t, _ = f_t(inputs, params, 'teacher.')
-    #             y_t = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))[1]
-    #             classacc_t.add(y_t, targets)
-    #             t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
-    #             classacc_t.reset()
-    #     print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
+    if opt.teacher_id != '':
+        classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
+        t_test_acc_top1, t_test_acc_top5 = [], []
+        with torch.no_grad():
+            for i, (inputs, targets) in enumerate(iter_test):
+                inputs = inputs.cuda().detach()
+                targets = targets.cuda().long().detach()
+                # y_t, _ = f_t(inputs, params, 'teacher.')
+                y_t = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))[1]
+                classacc_t.add(y_t, targets)
+                t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
+                classacc_t.reset()
+        print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
 
     def h(sample):
         inputs, targets, mode = sample
