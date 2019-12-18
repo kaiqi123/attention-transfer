@@ -89,8 +89,10 @@ def define_teacher(params_file):
         params[k] = Variable(v, requires_grad=False)
     print('\nTeacher wide-resnet-50-2 Total parameters:', sum(v.numel() for v in params.values()))
 
-    blocks = [sum([re.match('group%d.block\d+.conv0.weight' % j, k) is not None
-                   for k in params.keys()]) for j in range(4)]
+    # blocks = [sum([re.match('group%d.block\d+.conv0.weight' % j, k) is not None
+    #                for k in params.keys()]) for j in range(4)]
+
+    blocks = [1, 1, 1, 1]
 
     def conv2d(input, params, base, stride=1, pad=0):
         return F.conv2d(input, params[base + '.weight'], params[base + '.bias'], stride, pad)
