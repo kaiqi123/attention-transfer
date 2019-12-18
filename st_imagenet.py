@@ -86,7 +86,7 @@ def define_teacher(params_file):
     params = torch.load(params_file)
     for k, v in sorted(params.items()):
         # print(k, tuple(v.shape))
-        params[k] = Variable(v, requires_grad=True)
+        params[k] = Variable(v, requires_grad=False)
     print('\nTeacher wide-resnet-50-2 Total parameters:', sum(v.numel() for v in params.values()))
 
     blocks = [sum([re.match('group%d.block\d+.conv0.weight' % j, k) is not None
@@ -117,14 +117,20 @@ def define_teacher(params_file):
         # o = F.conv2d(input, params['conv0.weight'], params['conv0.bias'], 2, 3)
         o = conv2d(input, params, pr+'conv0', 2, 3)
         o = F.relu(o)
+        print(o.shape)
         o = F.max_pool2d(o, 3, 2, 1)
+        print(o.shape)
         o_g0 = group(o, params, pr+'group0', 1, blocks[0])
         o_g1 = group(o_g0, params, pr+'group1', 2, blocks[1])
         o_g2 = group(o_g1, params, pr+'group2', 2, blocks[2])
         o_g3 = group(o_g2, params, pr+'group3', 2, blocks[3])
+        print(o_g0.shape, o_g1.shape, o_g2.shape, o_g3.shape)
         o = F.avg_pool2d(o_g3, 7, 1, 0)
+        print(o.shape)
         o = o.view(o.size(0), -1)
+        print(o.shape)
         o = F.linear(o, params[pr+'fc.weight'], params[pr+'fc.bias'])
+        print(o.shape)
         return o, (o_g0, o_g1, o_g2, o_g3)
 
     return f, params
@@ -132,7 +138,7 @@ def define_teacher(params_file):
 
 def define_student(depth, width):
     definitions = {18: [2,2,2,2],
-                   34: [3,4,6,5]}
+                   34: [3,4,6,3]}
     assert depth in list(definitions.keys())
     widths = [int(w * width) for w in (64, 128, 256, 512)]
     blocks = definitions[depth]
@@ -258,19 +264,20 @@ def main():
     timer_test = tnt.meter.TimeMeter('s')
     meters_at = [tnt.meter.AverageValueMeter() for i in range(4)]
 
-    if opt.teacher_id != '':
-        classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
-        t_test_acc_top1, t_test_acc_top5 = [], []
-        with torch.no_grad():
-            for i, (inputs, targets) in enumerate(iter_test):
-                inputs = inputs.cuda().detach()
-                targets = targets.cuda().long().detach()
-                # y_t, _ = f_t(inputs, params, 'teacher.')
-                y_t = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))[1]
-                classacc_t.add(y_t, targets)
-                t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
-                classacc_t.reset()
-        print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
+    # check teacher test accuracy
+    # if opt.teacher_id != '':
+    #     classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
+    #     t_test_acc_top1, t_test_acc_top5 = [], []
+    #     with torch.no_grad():
+    #         for i, (inputs, targets) in enumerate(iter_test):
+    #             inputs = inputs.cuda().detach()
+    #             targets = targets.cuda().long().detach()
+    #             # y_t, _ = f_t(inputs, params, 'teacher.')
+    #             y_t = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))[1]
+    #             classacc_t.add(y_t, targets)
+    #             t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
+    #             classacc_t.reset()
+    #     print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
 
     def h(sample):
         inputs, targets, mode = sample
