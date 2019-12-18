@@ -99,17 +99,21 @@ def define_teacher(params_file):
         o = input
         for i in range(0, n):
             b_base = ('%s.block%d.conv') % (base, i)
+            print(b_base)
             x = o
             o = conv2d(x, params, b_base + '0')
             o = F.relu(o)
+            print(o.shape)
             o = conv2d(o, params, b_base + '1', stride=i == 0 and stride or 1, pad=1)
             o = F.relu(o)
+            print(o.shape)
             o = conv2d(o, params, b_base + '2')
             if i == 0:
                 o += conv2d(x, params, b_base + '_dim', stride=stride)
             else:
                 o += x
             o = F.relu(o)
+            print(o.shape)
         return o
 
 
