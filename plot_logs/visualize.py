@@ -39,11 +39,9 @@ os.chdir(r'/home/local/ASUAD/kzhao27/Desktop/my_code/server/attention-transfer/'
 
 dir = "./logs/"
 filenames = [
-            # "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm_1gpu_cosine_teacherCosine",
-            # "cifar10_dependent_d10w10_bs128_3reluFc_part22_updateWeightsAndBn_norm_1gpu_lrCosine",
-            "cifar10_dependent_d10w10_bs128_onlyFc_1gpu_cosine_teacherCosine",
-            'cifar10_dependent_d10w10_bs128_onlyFc_lrCosine',
-            # "cifar10_independent_d10w10_bs128_lrCosine",
+            "imagenet_dependent_resnet18_at",
+            'imagenet_dependent_resnet18_onlyFc',
+            "imagenet_independent_resnet18",
             # 'cifar10_teacher_d28w10_bs128_lrCosine',
             ]
 plotLogs(dir, filenames)

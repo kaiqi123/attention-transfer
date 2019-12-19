@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader
 import utils
 from collections import OrderedDict
 from torch.autograd import Variable
-
 import time
 
 cudnn.benchmark = True
@@ -85,14 +84,19 @@ def define_teacher(params_file):
     """
     params = torch.load(params_file)
     for k, v in sorted(params.items()):
-        # print(k, tuple(v.shape))
+        # print(k, v.shape)
         params[k] = Variable(v, requires_grad=False)
     print('\nTeacher wide-resnet-50-2 Total parameters:', sum(v.numel() for v in params.values()))
 
-    # blocks = [sum([re.match('group%d.block\d+.conv0.weight' % j, k) is not None
-    #                for k in params.keys()]) for j in range(4)]
+    # [3,4,6,3]
+    blocks = [sum([re.match('group%d.block\d+.conv0.weight' % j, k) is not None
+                   for k in params.keys()]) for j in range(4)]
 
-    blocks = [1, 1, 1, 1]
+    # select the same architechure with wide-resnet-14-2
+    # params = {k: v for k, v in params.items() if 'block0' in k or "fc" in k or k=="conv0.weight" or k=="conv0.bias"}
+    # for k, v in sorted(params.items()): print(k, v.shape)
+    # blocks = [1, 1, 1, 1]
+    # print('\nwide-resnet-14-2 (including conv biases) Total parameters:', sum(v.numel() for v in params.values()))
 
     def conv2d(input, params, base, stride=1, pad=0):
         return F.conv2d(input, params[base + '.weight'], params[base + '.bias'], stride, pad)
@@ -101,105 +105,99 @@ def define_teacher(params_file):
         o = input
         for i in range(0, n):
             b_base = ('%s.block%d.conv') % (base, i)
-            # print(b_base)
             x = o
             o = conv2d(x, params, b_base + '0')
             o = F.relu(o)
-            # print(o.shape)
             o = conv2d(o, params, b_base + '1', stride=i == 0 and stride or 1, pad=1)
             o = F.relu(o)
-            # print(o.shape)
             o = conv2d(o, params, b_base + '2')
             if i == 0:
                 o += conv2d(x, params, b_base + '_dim', stride=stride)
             else:
                 o += x
             o = F.relu(o)
-            # print(o.shape)
         return o
-
 
     def f(input, params, pr=''):
         # o = F.conv2d(input, params['conv0.weight'], params['conv0.bias'], 2, 3)
         o = conv2d(input, params, pr+'conv0', 2, 3)
         o = F.relu(o)
-        # print(o.shape)
         o = F.max_pool2d(o, 3, 2, 1)
-        # print(o.shape)
         o_g0 = group(o, params, pr+'group0', 1, blocks[0])
         o_g1 = group(o_g0, params, pr+'group1', 2, blocks[1])
         o_g2 = group(o_g1, params, pr+'group2', 2, blocks[2])
         o_g3 = group(o_g2, params, pr+'group3', 2, blocks[3])
-        # print(o_g0.shape, o_g1.shape, o_g2.shape, o_g3.shape)
         o = F.avg_pool2d(o_g3, 7, 1, 0)
-        # print(o.shape)
         o = o.view(o.size(0), -1)
-        # print(o.shape)
         o = F.linear(o, params[pr+'fc.weight'], params[pr+'fc.bias'])
-        # print(o.shape)
         return o, (o_g0, o_g1, o_g2, o_g3)
 
     return f, params
 
 
 def define_student(depth, width):
-    definitions = {18: [2,2,2,2],
-                   34: [3,4,6,3]}
+    # wide-resnet-14-2, 21530792
+    definitions = {14: [1, 1, 1, 1]}
     assert depth in list(definitions.keys())
     widths = [int(w * width) for w in (64, 128, 256, 512)]
     blocks = definitions[depth]
+    print("student model is resnet-{}-{}".format(depth, width))
 
-    def gen_block_params(ni, no):
-        return {'conv0': utils.conv_params(ni, no, 3),
-                'conv1': utils.conv_params(no, no, 3),
-                'bn0': utils.bnparams(no),
-                'bn1': utils.bnparams(no),
-                'convdim': utils.conv_params(ni, no, 1) if ni != no else None,
+    def gen_block_params(ni, nm, no):
+        return {'conv0': utils.conv_params(ni, nm, 1),
+                'conv1': utils.conv_params(nm, nm, 3),
+                'conv2': utils.conv_params(nm, no, 1),
+                'conv_dim': utils.conv_params(ni, no, 1) if ni != no else None,
                 }
 
-    def gen_group_params(ni, no, count):
-        return {'block%d'%i: gen_block_params(ni if i==0 else no, no)
-                for i in range(count)}
+    def gen_group_params(ni, nm, no, count):
+        return {'block%d' % i: gen_block_params(ni if i==0 else no, nm, no) for i in range(count)}
 
     flat_params = OrderedDict(utils.flatten({
         'conv0': utils.conv_params(3, 64, 7),
-        'bn0': utils.bnparams(64),
-        'group0': gen_group_params(64, widths[0], blocks[0]),
-        'group1': gen_group_params(widths[0], widths[1], blocks[1]),
-        'group2': gen_group_params(widths[1], widths[2], blocks[2]),
-        'group3': gen_group_params(widths[2], widths[3], blocks[3]),
-        'fc': utils.linear_params(widths[3], 1000),
+        'group0': gen_group_params(64, widths[0], widths[0]*2, blocks[0]),
+        'group1': gen_group_params(widths[0]*2, widths[1],  widths[1]*2, blocks[1]),
+        'group2': gen_group_params(widths[1]*2, widths[2],  widths[2]*2, blocks[2]),
+        'group3': gen_group_params(widths[2]*2, widths[3],  widths[3]*2, blocks[3]),
+        'fc': utils.linear_params(widths[3]*2, 1000),
     }))
 
     utils.set_requires_grad_except_bn_(flat_params)
 
-    def block(x, params, base, mode, stride):
-        y = F.conv2d(x, params[base+'.conv0'], stride=stride, padding=1)
-        o1 = F.relu(utils.batch_norm(y, params, base+'.bn0', mode), inplace=True)
-        z = F.conv2d(o1, params[base+'.conv1'], stride=1, padding=1)
-        o2 = utils.batch_norm(z, params, base+'.bn1', mode)
-        if base + '.convdim' in params:
-            return F.relu(o2 + F.conv2d(x, params[base+'.convdim'], stride=stride), inplace=True)
-        else:
-            return F.relu(o2 + x, inplace=True)
+    def conv2d(input, params, base, stride=1, pad=0):
+        # return F.conv2d(input, params[base + '.weight'], params[base + '.bias'], stride, pad)
+        return F.conv2d(input, params[base], stride=stride, padding=pad)
 
-    def group(o, params, base, mode, stride, n):
-        for i in range(n):
-            o = block(o, params, '%s.block%d' % (base, i), mode, stride if i == 0 else 1)
+    def group(input, params, base, stride, n):
+        o = input
+        for i in range(0, n):
+            b_base = ('%s.block%d.conv') % (base, i)
+            x = o
+            o = conv2d(x, params, b_base + '0')
+            o = F.relu(o)
+            o = conv2d(o, params, b_base + '1', stride=i == 0 and stride or 1, pad=1)
+            o = F.relu(o)
+            o = conv2d(o, params, b_base + '2')
+            if i == 0:
+                o += conv2d(x, params, b_base + '_dim', stride=stride)
+            else:
+                o += x
+            o = F.relu(o)
         return o
 
     def f(input, params, mode, pr=''):
-        o = F.conv2d(input, params[pr+'conv0'], stride=2, padding=3)
-        o = F.relu(utils.batch_norm(o, params, pr+'bn0', mode), inplace=True)
+        # o = F.conv2d(input, params['conv0.weight'], params['conv0.bias'], 2, 3)
+        o = conv2d(input, params, pr + 'conv0', 2, 3)
+        o = F.relu(o)
         o = F.max_pool2d(o, 3, 2, 1)
-        g0 = group(o, params, pr+'group0', mode, 1, blocks[0])
-        g1 = group(g0, params, pr+'group1', mode, 2, blocks[1])
-        g2 = group(g1, params, pr+'group2', mode, 2, blocks[2])
-        g3 = group(g2, params, pr+'group3', mode, 2, blocks[3])
-        o = F.avg_pool2d(g3, 7)
+        o_g0 = group(o, params, pr + 'group0', 1, blocks[0])
+        o_g1 = group(o_g0, params, pr + 'group1', 2, blocks[1])
+        o_g2 = group(o_g1, params, pr + 'group2', 2, blocks[2])
+        o_g3 = group(o_g2, params, pr + 'group3', 2, blocks[3])
+        o = F.avg_pool2d(o_g3, 7, 1, 0)
         o = o.view(o.size(0), -1)
-        o = F.linear(o, params[pr+'fc.weight'], params[pr+'fc.bias'])
-        return o, [g0, g1, g2, g3]
+        o = F.linear(o, params[pr + 'fc.weight'], params[pr + 'fc.bias'])
+        return o, (o_g0, o_g1, o_g2, o_g3)
 
     return f, flat_params
 
@@ -222,6 +220,19 @@ def main():
     if opt.teacher_id:
         assert opt.teacher_id == "resnet-50-2"
         f_t, params_t = define_teacher(opt.teacher_params)
+
+        # init student
+        # params_temp = {k: v for k, v in params_t.items() if 'block0' in k and "weight" in k or "fc" in k or k=="conv0.weight"}
+        # for k, v in sorted(params_temp.items()):
+        #     t = re.findall(r'(.*?).weight', k)
+        #     if t!=[] and 'conv' in t[0]:
+        #         assert t[0] in params_s.keys()
+        #         params_s[t[0]].data=v.data
+        #         print(t[0], v.shape)
+        # params_s['fc.weight'].data = params_t['fc.weight'].data
+        # params_s['fc.bias'].data = params_t['fc.bias'].data
+        # print('\nStudent wide-resnet-14-2 Total parameters:', sum(v.numel() for v in params_temp.values())) # 21530792
+
         params = {'student.'+k: v for k, v in params_s.items()}
         params.update({'teacher.'+k: v for k, v in params_t.items()})
         def f(inputs, params, mode):
@@ -270,20 +281,27 @@ def main():
     timer_test = tnt.meter.TimeMeter('s')
     meters_at = [tnt.meter.AverageValueMeter() for i in range(4)]
 
-    # check teacher test accuracy
+    # # check teacher test accuracy
     if opt.teacher_id != '':
-        classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
-        t_test_acc_top1, t_test_acc_top5 = [], []
+        print("begin to check teacher and student init accuracy......")
+        def add_accuracy(y, targets, classacc, test_acc_top1, test_acc_top5):
+            classacc.add(y, targets)
+            test_acc_top1.append(classacc.value()[0])
+            test_acc_top5.append(classacc.value()[1])
+            classacc.reset()
+            return test_acc_top1, test_acc_top5
+
+        classacc_s = classacc_t = tnt.meter.ClassErrorMeter(topk=[1, 5], accuracy=True)
+        t_test_acc_top1, t_test_acc_top5, s_test_acc_top1, s_test_acc_top5 = [], [], [], []
         with torch.no_grad():
             for i, (inputs, targets) in enumerate(iter_test):
                 inputs = inputs.cuda().detach()
                 targets = targets.cuda().long().detach()
-                # y_t, _ = f_t(inputs, params, 'teacher.')
-                y_t = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))[1]
-                classacc_t.add(y_t, targets)
-                t_test_acc_top1.append(classacc_t.value()[0]);t_test_acc_top5.append(classacc_t.value()[1])
-                classacc_t.reset()
+                y_s, y_t, _ = utils.data_parallel(f, inputs, params, False, range(opt.ngpu))
+                t_test_acc_top1, t_test_acc_top5 = add_accuracy(y_t, targets, classacc_t, t_test_acc_top1, t_test_acc_top5)
+                s_test_acc_top1, s_test_acc_top5 = add_accuracy(y_s, targets, classacc_s, s_test_acc_top1, s_test_acc_top5)
         print("teacher top1 test acc: {}, teacher top5 test acc: {}".format(np.mean(t_test_acc_top1), np.mean(t_test_acc_top5)))
+        print("student top1 test acc: {}, student top5 test acc: {}".format(np.mean(s_test_acc_top1), np.mean(s_test_acc_top5)))
 
     def h(sample):
         inputs, targets, mode = sample
